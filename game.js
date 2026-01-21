@@ -1,3 +1,5 @@
+// game.js
+
 // --- Telegram init (не ломает запуск в обычном браузере) ---
 (function initTelegram() {
   if (window.Telegram?.WebApp) {
@@ -24,9 +26,18 @@ const PROMO_TEXT = `Победа! Промокод -20%: ${PROMO_CODE}`;
 // Ссылка на курс
 const COURSE_URL = "https://slurm.io/architect";
 
+// Типы проблем (эмодзи + диапазоны скорости)
+const PROBLEM_TYPES = [
+  { emoji: "👾", speedMin: 60, speedMax: 95 },   // базовый
+  { emoji: "🐞", speedMin: 70, speedMax: 110 },  // быстрее
+  { emoji: "🧨", speedMin: 50, speedMax: 85 },   // медленнее
+  { emoji: "⚠️", speedMin: 65, speedMax: 105 },  // быстрый
+  { emoji: "🧯", speedMin: 55, speedMax: 90 },   // средний
+];
+
 const config = {
   type: Phaser.AUTO,
-  backgroundColor: "#000000",
+  backgroundColor: "#170F63",
   scale: {
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH,
@@ -54,13 +65,12 @@ let timerText, levelText, livesText, messageText;
 let tickEvent;
 
 let gameEnded = false;
+let gameStarted = false; // пока false — показываем интро
 
-// --- UI победы ---
+// --- UI контейнеры ---
 let winContainer = null;
-
-// --- Стартовый экран ---
 let introContainer = null;
-let gameStarted = false; // пока false — игра "заморожена"
+let loseContainer = null;
 
 function create() {
   centerX = this.scale.width / 2;
@@ -70,10 +80,11 @@ function create() {
   arenaGfx = this.add.graphics();
   drawArena();
 
-  levelText = this.add.text(16, 16, `Уровень: ${level}`, { fontSize: "20px", color: "#ffffff" });
-  timerText = this.add.text(16, 44, `Время: ${timeLeft}`, { fontSize: "20px", color: "#ffffff" });
-  livesText = this.add.text(16, 72, `Жизни: ${livesLeft}`, { fontSize: "20px", color: "#ffffff" });
-  messageText = this.add.text(16, 100, "", { fontSize: "18px", color: "#ff5555" }).setVisible(false);
+  // UI сверху
+  levelText = this.add.text(16, 16, `Уровень: ${level}`, { fontFamily: "Inter", fontSize: "20px", color: "#ffffff" });
+  timerText = this.add.text(16, 44, `Время: ${timeLeft}`, { fontFamily: "Inter", fontSize: "20px", color: "#ffffff" });
+  livesText = this.add.text(16, 72, `Жизни: ${livesLeft}`, { fontFamily: "Inter", fontSize: "20px", color: "#ffffff" });
+  messageText = this.add.text(16, 100, "", { fontFamily: "Inter", fontSize: "18px", color: "#ff5555" }).setVisible(false);
 
   // Демоны
   demons = [];
@@ -83,25 +94,23 @@ function create() {
 
   // Drag handlers — один раз
   this.input.on("dragstart", (pointer, obj) => {
-    if (gameEnded) return;
-    if (!gameStarted) return; // пока интро — не даём играть
+    if (gameEnded || !gameStarted) return;
     dragged = obj;
-    obj.bodyColor = 0x00ff88;
+    obj.setScale(1.08); // небольшой визуальный фидбек
   });
 
   this.input.on("drag", (pointer, obj, dragX, dragY) => {
-    if (gameEnded) return;
-    if (!gameStarted) return;
+    if (gameEnded || !gameStarted) return;
     obj.x = dragX;
     obj.y = dragY;
   });
 
   this.input.on("dragend", (pointer, obj) => {
-    if (gameEnded) return;
-    if (!gameStarted) return;
+    if (gameEnded || !gameStarted) return;
     dragged = null;
-    obj.bodyColor = 0xff3355;
+    obj.setScale(1.0);
 
+    // Мягко “впихиваем” к центру
     this.tweens.add({
       targets: obj,
       x: Phaser.Math.Linear(obj.x, centerX, 0.35),
@@ -111,23 +120,18 @@ function create() {
     });
   });
 
-  // Показать стартовый экран (интро)
+  // Стартовый экран
   showIntroUI(this);
-
-  // ВАЖНО: таймер запускаем ТОЛЬКО после нажатия "Начать"
-  // поэтому здесь tickEvent не создаём.
 }
 
 function startTimer(scene) {
-  // если уже есть — не плодим
   if (tickEvent) tickEvent.remove(false);
 
   tickEvent = scene.time.addEvent({
     delay: 1000,
     loop: true,
     callback: () => {
-      if (gameEnded) return;
-      if (!gameStarted) return;
+      if (gameEnded || !gameStarted) return;
 
       timeLeft -= 1;
       timerText.setText(`Время: ${timeLeft}`);
@@ -145,8 +149,7 @@ function startTimer(scene) {
 }
 
 function update(time, delta) {
-  if (gameEnded) return;
-  if (!gameStarted) return; // пока интро — всё стоит
+  if (gameEnded || !gameStarted) return;
 
   const dt = delta / 1000;
   const speedMul = levelSpeedMultiplier(level);
@@ -154,6 +157,7 @@ function update(time, delta) {
   for (const d of demons) {
     if (d === dragged) continue;
 
+    // Радиальное движение наружу
     const vx = d.x - centerX;
     const vy = d.y - centerY;
     const len = Math.hypot(vx, vy) || 1;
@@ -164,6 +168,7 @@ function update(time, delta) {
     d.x += nx * d.baseSpeed * speedMul * dt;
     d.y += ny * d.baseSpeed * speedMul * dt;
 
+    // Проверка выхода за круг
     const dist = Math.hypot(d.x - centerX, d.y - centerY);
     if (dist > arenaRadius) {
       restartLevel(this);
@@ -172,16 +177,28 @@ function update(time, delta) {
   }
 }
 
+// --------------------
+// Демоны (эмодзи-проблемы)
+// --------------------
+function pickProblemType() {
+  return PROBLEM_TYPES[Math.floor(Math.random() * PROBLEM_TYPES.length)];
+}
+
 function spawnDemon(scene) {
   const ang = Math.random() * Math.PI * 2;
-  const r = Math.random() * arenaRadius * 0.5;
+  const r = Math.random() * arenaRadius * 0.4;
   const x = centerX + Math.cos(ang) * r;
   const y = centerY + Math.sin(ang) * r;
 
-  // радиус побольше, чтобы удобно хватать
-  const demon = scene.add.circle(x, y, 30, 0xff3355);
+  const t = pickProblemType();
 
-  demon.baseSpeed = Phaser.Math.FloatBetween(60, 95);
+  const demon = scene.add.text(x, y, t.emoji, {
+    fontFamily: "Inter, Apple Color Emoji, Segoe UI Emoji",
+    fontSize: "34px",
+  }).setOrigin(0.5);
+
+  demon.problemType = t.emoji;
+  demon.baseSpeed = Phaser.Math.Between(t.speedMin, t.speedMax);
 
   demon.setInteractive({ useHandCursor: true });
   scene.input.setDraggable(demon);
@@ -189,6 +206,16 @@ function spawnDemon(scene) {
   return demon;
 }
 
+function rerollDemon(d) {
+  const t = pickProblemType();
+  d.setText(t.emoji);
+  d.problemType = t.emoji;
+  d.baseSpeed = Phaser.Math.Between(t.speedMin, t.speedMax);
+}
+
+// --------------------
+// Логика уровней / жизни / победа / поражение
+// --------------------
 function restartLevel(scene) {
   if (gameEnded) return;
 
@@ -196,11 +223,10 @@ function restartLevel(scene) {
   livesText.setText(`Жизни: ${livesLeft}`);
 
   if (livesLeft > 0) {
-    showMessage(scene, `Демон вырвался! Осталось жизней: ${livesLeft}`, "#ff5555", 1200);
+    showMessage(scene, `Проблема вышла из круга! Осталось жизней: ${livesLeft}`, "#ff5555", 1200);
     startLevel(scene, { keepLives: true });
   } else {
-    showMessage(scene, "Жизни закончились. Начинаем заново!", "#ff5555", 2000);
-    resetGame(scene);
+    loseGame(scene);
   }
 }
 
@@ -216,69 +242,76 @@ function startLevel(scene, options = {}) {
     livesText.setText(`Жизни: ${livesLeft}`);
   }
 
-  // Включаем интерактивность демонов (на случай если была победа)
-  for (const d of demons) {
-    d.setInteractive({ useHandCursor: true });
-    scene.input.setDraggable(d);
-  }
-
+  // Переразместить демонов + перемешать типы
   for (const d of demons) {
     const ang = Math.random() * Math.PI * 2;
     const r = Math.random() * arenaRadius * 0.45;
+
     d.x = centerX + Math.cos(ang) * r;
     d.y = centerY + Math.sin(ang) * r;
-    d.baseSpeed = Phaser.Math.FloatBetween(60, 95);
+
+    rerollDemon(d);
+
+    d.setInteractive({ useHandCursor: true });
+    scene.input.setDraggable(d);
   }
 }
 
-function resetGame(scene) {
+function resetGameToStart(scene) {
+  // полный сброс под "первый уровень" (без интро)
   gameEnded = false;
+  gameStarted = true;
+
   level = 1;
   livesLeft = LIVES_TOTAL;
-  gameStarted = true; // после "начала" продолжаем игру, не возвращаем интро
 
   levelText.setText(`Уровень: ${level}`);
   livesText.setText(`Жизни: ${livesLeft}`);
 
   destroyWinUI();
+  destroyLoseUI();
 
-  // Запускаем первый уровень
   startLevel(scene, { keepLives: true });
   startTimer(scene);
 }
 
 function winGame(scene) {
   gameEnded = true;
-
-  // Остановить таймер
   if (tickEvent) tickEvent.remove(false);
 
-  // Остановить взаимодействие с демонами (но не input целиком)
   dragged = null;
-  for (const d of demons) {
-    d.disableInteractive();
-  }
+  for (const d of demons) d.disableInteractive();
 
-  // Показать промокод + кнопку
   showWinUI(scene);
 }
 
+function loseGame(scene) {
+  gameEnded = true;
+  if (tickEvent) tickEvent.remove(false);
+
+  dragged = null;
+  for (const d of demons) d.disableInteractive();
+
+  showLoseUI(scene);
+}
+
 // --------------------
-// Intro UI (экран перед стартом)
+// Intro UI
 // --------------------
 function showIntroUI(scene) {
   destroyIntroUI();
 
   introContainer = scene.add.container(0, 0);
 
-  const overlay = scene.add.rectangle(centerX, centerY, GAME_W, GAME_H, 0x000000, 0.85).setOrigin(0.5);
+  const overlay = scene.add.rectangle(centerX, centerY, GAME_W, GAME_H, 0x000000, 1).setOrigin(0.5);
 
-  const title = scene.add.text(centerX, centerY - 240, "Защити систему от хаоса", {
-  fontSize: "22px",
-  color: "#ffffff",
-  fontStyle: "bold",
-  align: "center",
-}).setOrigin(0.5);
+  const title = scene.add.text(centerX, centerY - 220, "Защити систему от хаоса", {
+    fontFamily: "Inter",
+    fontSize: "22px",
+    color: "#ffffff",
+    fontStyle: "700",
+    align: "center",
+  }).setOrigin(0.5);
 
   const bodyText =
     "Тебе нужно удержать всю систему в рабочем состоянии,\n" +
@@ -289,37 +322,39 @@ function showIntroUI(scene) {
     "Если ты выиграешь, то получишь скидку 20%\n" +
     "на курс «Архитектура приложений».";
 
-  const text = scene.add.text(centerX, centerY - 40, bodyText, {
+  const text = scene.add.text(centerX, centerY - 35, bodyText, {
+    fontFamily: "Inter",
     fontSize: "15px",
-    color: "#ffffff",
+    fontStyle: "400",
+    color: "#EDEBFF",
     align: "center",
     lineSpacing: 6,
     wordWrap: { width: GAME_W - 40 }
   }).setOrigin(0.5);
 
-  // Кнопка "Начать"
+  // Кнопка "Начать" (цвета по твоим требованиям)
   const btnW = 240;
   const btnH = 54;
-  const btnY = centerY + 210;
+  const btnY = centerY + 220;
 
-  const btnBg = scene.add.rectangle(centerX, btnY, btnW, btnH, 0x00d5ff, 1).setOrigin(0.5);
-  btnBg.setStrokeStyle(2, 0x003344, 1);
+  const btnBg = scene.add.rectangle(centerX, btnY, btnW, btnH, 0x66D966, 1).setOrigin(0.5);
+  btnBg.setStrokeStyle(1, 0x000000, 1);
 
   const btnText = scene.add.text(centerX, btnY, "Начать", {
+    fontFamily: "Inter",
     fontSize: "18px",
-    color: "#001018",
-    fontStyle: "bold",
+    fontStyle: "600",
+    color: "#000000",
   }).setOrigin(0.5);
 
   btnBg.setInteractive({ useHandCursor: true });
   btnBg.on("pointerdown", () => {
-    // закрываем интро и стартуем игру
     destroyIntroUI();
 
     gameStarted = true;
     gameEnded = false;
 
-    // сбрасываем стартовые значения (на случай если перезагрузили страницу)
+    // сброс
     level = 1;
     livesLeft = LIVES_TOTAL;
     timeLeft = LEVEL_TIME_SEC;
@@ -328,7 +363,6 @@ function showIntroUI(scene) {
     livesText.setText(`Жизни: ${livesLeft}`);
     timerText.setText(`Время: ${timeLeft}`);
 
-    // старт уровня + таймер
     startLevel(scene, { keepLives: true });
     startTimer(scene);
   });
@@ -351,18 +385,20 @@ function showWinUI(scene) {
 
   winContainer = scene.add.container(0, 0);
 
-  const overlay = scene.add.rectangle(centerX, centerY, GAME_W, GAME_H, 0x000000, 0.75).setOrigin(0.5);
+  const overlay = scene.add.rectangle(centerX, centerY, GAME_W, GAME_H, 0x000000, 1).setOrigin(0.5);
 
-  const title = scene.add.text(centerX, centerY - 110, "Ты защитил систему!", {
+  const title = scene.add.text(centerX, centerY - 130, "Ты защитил систему!", {
+    fontFamily: "Inter",
     fontSize: "22px",
     color: "#ffffff",
-    fontStyle: "bold",
+    fontStyle: "700",
     align: "center",
   }).setOrigin(0.5);
 
-  const promo = scene.add.text(centerX, centerY - 70, PROMO_TEXT, {
+  const promo = scene.add.text(centerX, centerY - 85, PROMO_TEXT, {
+    fontFamily: "Inter",
     fontSize: "18px",
-    color: "#55ff88",
+    color: "#66D966",
     align: "center",
     wordWrap: { width: GAME_W - 40 }
   }).setOrigin(0.5);
@@ -371,23 +407,25 @@ function showWinUI(scene) {
   const btnH = 52;
   const btnY = centerY + 10;
 
-  const btnBg = scene.add.rectangle(centerX, btnY, btnW, btnH, 0x00d5ff, 1).setOrigin(0.5);
-  btnBg.setStrokeStyle(2, 0x003344, 1);
+  const btnBg = scene.add.rectangle(centerX, btnY, btnW, btnH, 0x66D966, 1).setOrigin(0.5);
+  btnBg.setStrokeStyle(1, 0x000000, 1);
 
-  const btnText = scene.add.text(centerX, btnY, "Перейти на slurm.io/architect", {
+  const btnText = scene.add.text(centerX, btnY, "Воспользоваться промокодом", {
+    fontFamily: "Inter",
     fontSize: "15px",
-    color: "#001018",
-    fontStyle: "bold",
+    fontStyle: "700",
+    color: "#000000",
   }).setOrigin(0.5);
 
   btnBg.setInteractive({ useHandCursor: true });
   btnBg.on("pointerdown", () => openCourseLink());
 
   const hint = scene.add.text(centerX, centerY + 80, "Откроется страница курса.\nПромокод применяй при оплате.", {
+    fontFamily: "Inter",
     fontSize: "14px",
-    color: "#ffffff",
+    color: "#EDEBFF",
     align: "center",
-    alpha: 0.9,
+    alpha: 0.95,
   }).setOrigin(0.5);
 
   winContainer.add([overlay, title, promo, btnBg, btnText, hint]);
@@ -400,6 +438,66 @@ function destroyWinUI() {
   }
 }
 
+// --------------------
+// Lose UI (когда закончились жизни)
+// --------------------
+function showLoseUI(scene) {
+  destroyLoseUI();
+
+  loseContainer = scene.add.container(0, 0);
+
+  const overlay = scene.add.rectangle(centerX, centerY, GAME_W, GAME_H, 0x000000, 1).setOrigin(0.5);
+
+  const title = scene.add.text(centerX, centerY - 110, "Жизни закончились", {
+    fontFamily: "Inter",
+    fontSize: "22px",
+    color: "#ffffff",
+    fontStyle: "700",
+    align: "center",
+  }).setOrigin(0.5);
+
+  const body = scene.add.text(centerX, centerY - 55, "Проблемы вышли из-под контроля.\nПопробуешь ещё раз?", {
+    fontFamily: "Inter",
+    fontSize: "15px",
+    color: "#EDEBFF",
+    align: "center",
+    lineSpacing: 6,
+    wordWrap: { width: GAME_W - 40 }
+  }).setOrigin(0.5);
+
+  const btnW = 240;
+  const btnH = 54;
+  const btnY = centerY + 30;
+
+  const btnBg = scene.add.rectangle(centerX, btnY, btnW, btnH, 0x66D966, 1).setOrigin(1);
+  btnBg.setStrokeStyle(1, 0x000000, 1);
+
+  const btnText = scene.add.text(centerX, btnY, "Начать заново", {
+    fontFamily: "Inter",
+    fontSize: "18px",
+    fontStyle: "700",
+    color: "#000000",
+  }).setOrigin(0.5);
+
+  btnBg.setInteractive({ useHandCursor: true });
+  btnBg.on("pointerdown", () => {
+    // сброс на 1 уровень
+    resetGameToStart(scene);
+  });
+
+  loseContainer.add([overlay, title, body, btnBg, btnText]);
+}
+
+function destroyLoseUI() {
+  if (loseContainer) {
+    loseContainer.destroy(true);
+    loseContainer = null;
+  }
+}
+
+// --------------------
+// Helpers
+// --------------------
 function openCourseLink() {
   if (window.Telegram?.WebApp?.openLink) {
     window.Telegram.WebApp.openLink(COURSE_URL);
@@ -409,13 +507,14 @@ function openCourseLink() {
 }
 
 function levelSpeedMultiplier(lvl) {
+  // плавное ускорение по уровням
   const map = [0.2, 0.3, 0.4, 0.5, 0.6];
   return map[Math.max(0, Math.min(map.length - 1, lvl - 1))];
 }
 
 function drawArena() {
   arenaGfx.clear();
-  arenaGfx.lineStyle(4, 0x00d5ff, 1);
+  arenaGfx.lineStyle(4, 0x66D966, 1);
   arenaGfx.strokeCircle(centerX, centerY, arenaRadius);
 }
 
