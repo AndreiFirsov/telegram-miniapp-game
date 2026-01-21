@@ -469,7 +469,7 @@ function showLoseUI(scene) {
   const btnH = 54;
   const btnY = centerY + 30;
 
-  const btnBg = scene.add.rectangle(centerX, btnY, btnW, btnH, 0x66D966, 1).setOrigin(1);
+  const btnBg = scene.add.rectangle(centerX, btnY, btnW, btnH, 0x66D966, 1).setOrigin(0.5);
   btnBg.setStrokeStyle(1, 0x000000, 1);
 
   const btnText = scene.add.text(centerX, btnY, "Начать заново", {
