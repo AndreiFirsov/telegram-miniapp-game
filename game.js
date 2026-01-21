@@ -273,12 +273,12 @@ function showIntroUI(scene) {
 
   const overlay = scene.add.rectangle(centerX, centerY, GAME_W, GAME_H, 0x000000, 0.85).setOrigin(0.5);
 
-  const title = scene.add.text(centerX, centerY - 190, "Защити систему от хаоса", {
-    fontSize: "22px",
-    color: "#ffffff",
-    fontStyle: "bold",
-    align: "center",
-  }).setOrigin(0.5);
+  const title = scene.add.text(centerX, centerY - 240, "Защити систему от хаоса", {
+  fontSize: "22px",
+  color: "#ffffff",
+  fontStyle: "bold",
+  align: "center",
+}).setOrigin(0.5);
 
   const bodyText =
     "Тебе нужно удержать всю систему в рабочем состоянии,\n" +
