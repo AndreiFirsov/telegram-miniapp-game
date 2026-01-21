@@ -58,6 +58,10 @@ let gameEnded = false;
 // --- UI победы ---
 let winContainer = null;
 
+// --- Стартовый экран ---
+let introContainer = null;
+let gameStarted = false; // пока false — игра "заморожена"
+
 function create() {
   centerX = this.scale.width / 2;
   centerY = this.scale.height / 2;
@@ -68,29 +72,8 @@ function create() {
 
   levelText = this.add.text(16, 16, `Уровень: ${level}`, { fontSize: "20px", color: "#ffffff" });
   timerText = this.add.text(16, 44, `Время: ${timeLeft}`, { fontSize: "20px", color: "#ffffff" });
-  livesText = this.add.text(16, 72, `Попытки: ${livesLeft}`, { fontSize: "20px", color: "#ffffff" });
+  livesText = this.add.text(16, 72, `Жизни: ${livesLeft}`, { fontSize: "20px", color: "#ffffff" });
   messageText = this.add.text(16, 100, "", { fontSize: "18px", color: "#ff5555" }).setVisible(false);
-
-  // Таймер
-  tickEvent = this.time.addEvent({
-    delay: 1000,
-    loop: true,
-    callback: () => {
-      if (gameEnded) return;
-
-      timeLeft -= 1;
-      timerText.setText(`Время: ${timeLeft}`);
-
-      if (timeLeft <= 0) {
-        if (level < LEVELS_TOTAL) {
-          level += 1;
-          startLevel(this, { keepLives: true });
-        } else {
-          winGame(this);
-        }
-      }
-    }
-  });
 
   // Демоны
   demons = [];
@@ -101,18 +84,21 @@ function create() {
   // Drag handlers — один раз
   this.input.on("dragstart", (pointer, obj) => {
     if (gameEnded) return;
+    if (!gameStarted) return; // пока интро — не даём играть
     dragged = obj;
     obj.bodyColor = 0x00ff88;
   });
 
   this.input.on("drag", (pointer, obj, dragX, dragY) => {
     if (gameEnded) return;
+    if (!gameStarted) return;
     obj.x = dragX;
     obj.y = dragY;
   });
 
   this.input.on("dragend", (pointer, obj) => {
     if (gameEnded) return;
+    if (!gameStarted) return;
     dragged = null;
     obj.bodyColor = 0xff3355;
 
@@ -125,11 +111,42 @@ function create() {
     });
   });
 
-  startLevel(this, { keepLives: true });
+  // Показать стартовый экран (интро)
+  showIntroUI(this);
+
+  // ВАЖНО: таймер запускаем ТОЛЬКО после нажатия "Начать"
+  // поэтому здесь tickEvent не создаём.
+}
+
+function startTimer(scene) {
+  // если уже есть — не плодим
+  if (tickEvent) tickEvent.remove(false);
+
+  tickEvent = scene.time.addEvent({
+    delay: 1000,
+    loop: true,
+    callback: () => {
+      if (gameEnded) return;
+      if (!gameStarted) return;
+
+      timeLeft -= 1;
+      timerText.setText(`Время: ${timeLeft}`);
+
+      if (timeLeft <= 0) {
+        if (level < LEVELS_TOTAL) {
+          level += 1;
+          startLevel(scene, { keepLives: true });
+        } else {
+          winGame(scene);
+        }
+      }
+    }
+  });
 }
 
 function update(time, delta) {
   if (gameEnded) return;
+  if (!gameStarted) return; // пока интро — всё стоит
 
   const dt = delta / 1000;
   const speedMul = levelSpeedMultiplier(level);
@@ -176,13 +193,13 @@ function restartLevel(scene) {
   if (gameEnded) return;
 
   livesLeft -= 1;
-  livesText.setText(`Попытки: ${livesLeft}`);
+  livesText.setText(`Жизни: ${livesLeft}`);
 
   if (livesLeft > 0) {
-    showMessage(scene, `Демон вырвался! Осталось попыток: ${livesLeft}`, "#ff5555", 1200);
+    showMessage(scene, `Демон вырвался! Осталось жизней: ${livesLeft}`, "#ff5555", 1200);
     startLevel(scene, { keepLives: true });
   } else {
-    showMessage(scene, "Попытки закончились. Начинаем заново!", "#ff5555", 2000);
+    showMessage(scene, "Жизни закончились. Начинаем заново!", "#ff5555", 2000);
     resetGame(scene);
   }
 }
@@ -196,10 +213,10 @@ function startLevel(scene, options = {}) {
 
   if (!keepLives) {
     livesLeft = LIVES_TOTAL;
-    livesText.setText(`Попытки: ${livesLeft}`);
+    livesText.setText(`Жизни: ${livesLeft}`);
   }
 
-  // Включаем интерактивность демонов (на случай если была победа/дизейбл)
+  // Включаем интерактивность демонов (на случай если была победа)
   for (const d of demons) {
     d.setInteractive({ useHandCursor: true });
     scene.input.setDraggable(d);
@@ -218,14 +235,16 @@ function resetGame(scene) {
   gameEnded = false;
   level = 1;
   livesLeft = LIVES_TOTAL;
+  gameStarted = true; // после "начала" продолжаем игру, не возвращаем интро
 
   levelText.setText(`Уровень: ${level}`);
-  livesText.setText(`Попытки: ${livesLeft}`);
+  livesText.setText(`Жизни: ${livesLeft}`);
 
   destroyWinUI();
 
   // Запускаем первый уровень
   startLevel(scene, { keepLives: true });
+  startTimer(scene);
 }
 
 function winGame(scene) {
@@ -234,7 +253,7 @@ function winGame(scene) {
   // Остановить таймер
   if (tickEvent) tickEvent.remove(false);
 
-  // Остановить взаимодействие с демонами, НО НЕ выключать input целиком (иначе кнопка не работает)
+  // Остановить взаимодействие с демонами (но не input целиком)
   dragged = null;
   for (const d of demons) {
     d.disableInteractive();
@@ -244,15 +263,96 @@ function winGame(scene) {
   showWinUI(scene);
 }
 
+// --------------------
+// Intro UI (экран перед стартом)
+// --------------------
+function showIntroUI(scene) {
+  destroyIntroUI();
+
+  introContainer = scene.add.container(0, 0);
+
+  const overlay = scene.add.rectangle(centerX, centerY, GAME_W, GAME_H, 0x000000, 0.85).setOrigin(0.5);
+
+  const title = scene.add.text(centerX, centerY - 190, "Защити систему от хаоса", {
+    fontSize: "22px",
+    color: "#ffffff",
+    fontStyle: "bold",
+    align: "center",
+  }).setOrigin(0.5);
+
+  const bodyText =
+    "Тебе нужно удержать всю систему в рабочем состоянии,\n" +
+    "чтобы проблемы и ошибки не разбежались.\n\n" +
+    `Удержи проблемы внутри круга ${LEVEL_TIME_SEC} секунд.\n` +
+    `Всего ${LEVELS_TOTAL} уровней. Каждый уровень ускоряет скорость проблем.\n` +
+    `У тебя ${LIVES_TOTAL} жизней.\n\n` +
+    "Если ты выиграешь, то получишь скидку 20%\n" +
+    "на курс «Архитектура приложений».";
+
+  const text = scene.add.text(centerX, centerY - 40, bodyText, {
+    fontSize: "15px",
+    color: "#ffffff",
+    align: "center",
+    lineSpacing: 6,
+    wordWrap: { width: GAME_W - 40 }
+  }).setOrigin(0.5);
+
+  // Кнопка "Начать"
+  const btnW = 240;
+  const btnH = 54;
+  const btnY = centerY + 210;
+
+  const btnBg = scene.add.rectangle(centerX, btnY, btnW, btnH, 0x00d5ff, 1).setOrigin(0.5);
+  btnBg.setStrokeStyle(2, 0x003344, 1);
+
+  const btnText = scene.add.text(centerX, btnY, "Начать", {
+    fontSize: "18px",
+    color: "#001018",
+    fontStyle: "bold",
+  }).setOrigin(0.5);
+
+  btnBg.setInteractive({ useHandCursor: true });
+  btnBg.on("pointerdown", () => {
+    // закрываем интро и стартуем игру
+    destroyIntroUI();
+
+    gameStarted = true;
+    gameEnded = false;
+
+    // сбрасываем стартовые значения (на случай если перезагрузили страницу)
+    level = 1;
+    livesLeft = LIVES_TOTAL;
+    timeLeft = LEVEL_TIME_SEC;
+
+    levelText.setText(`Уровень: ${level}`);
+    livesText.setText(`Жизни: ${livesLeft}`);
+    timerText.setText(`Время: ${timeLeft}`);
+
+    // старт уровня + таймер
+    startLevel(scene, { keepLives: true });
+    startTimer(scene);
+  });
+
+  introContainer.add([overlay, title, text, btnBg, btnText]);
+}
+
+function destroyIntroUI() {
+  if (introContainer) {
+    introContainer.destroy(true);
+    introContainer = null;
+  }
+}
+
+// --------------------
+// Win UI
+// --------------------
 function showWinUI(scene) {
   destroyWinUI();
 
   winContainer = scene.add.container(0, 0);
 
-  // Полупрозрачная подложка
   const overlay = scene.add.rectangle(centerX, centerY, GAME_W, GAME_H, 0x000000, 0.75).setOrigin(0.5);
 
-  // Текст победы
   const title = scene.add.text(centerX, centerY - 110, "Ты защитил систему!", {
     fontSize: "22px",
     color: "#ffffff",
@@ -267,7 +367,6 @@ function showWinUI(scene) {
     wordWrap: { width: GAME_W - 40 }
   }).setOrigin(0.5);
 
-  // Кнопка
   const btnW = 280;
   const btnH = 52;
   const btnY = centerY + 10;
@@ -281,11 +380,9 @@ function showWinUI(scene) {
     fontStyle: "bold",
   }).setOrigin(0.5);
 
-  // Делаем кнопку кликабельной
   btnBg.setInteractive({ useHandCursor: true });
   btnBg.on("pointerdown", () => openCourseLink());
 
-  // Хинт
   const hint = scene.add.text(centerX, centerY + 80, "Откроется страница курса.\nПромокод применяй при оплате.", {
     fontSize: "14px",
     color: "#ffffff",
@@ -304,7 +401,6 @@ function destroyWinUI() {
 }
 
 function openCourseLink() {
-  // В Telegram Mini App — корректно откроется через openLink
   if (window.Telegram?.WebApp?.openLink) {
     window.Telegram.WebApp.openLink(COURSE_URL);
   } else {
