@@ -10,7 +10,7 @@
 
 const LEVELS_TOTAL = 5;
 const DEMONS_TOTAL = 5;
-const LEVEL_TIME_SEC = 1;
+const LEVEL_TIME_SEC = 30;
 const LIVES_TOTAL = 5;
 
 // Дизайновый размер под вертикальный формат
@@ -313,7 +313,7 @@ function openCourseLink() {
 }
 
 function levelSpeedMultiplier(lvl) {
-  const map = [0.65, 1.0, 1.35, 1.75, 2.2];
+  const map = [0.2, 0.3, 0.4, 0.5, 0.6];
   return map[Math.max(0, Math.min(map.length - 1, lvl - 1))];
 }
 
