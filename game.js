@@ -28,24 +28,50 @@ const COURSE_URL = "https://slurm.io/architect";
 
 // Типы проблем (эмодзи + диапазоны скорости)
 const PROBLEM_TYPES = [
-  { emoji: "👾", speedMin: 60, speedMax: 95 },   // базовый
-  { emoji: "🐞", speedMin: 70, speedMax: 110 },  // быстрее
-  { emoji: "🧨", speedMin: 50, speedMax: 85 },   // медленнее
-  { emoji: "⚠️", speedMin: 65, speedMax: 105 },  // быстрый
-  { emoji: "🧯", speedMin: 55, speedMax: 90 },   // средний
+  { emoji: "👾", speedMin: 60, speedMax: 95 },
+  { emoji: "🤖", speedMin: 70, speedMax: 110 },
+  { emoji: "🔥", speedMin: 50, speedMax: 85 },
+  { emoji: "⚠️", speedMin: 65, speedMax: 105 },
+  { emoji: "⌛️", speedMin: 55, speedMax: 90 },
 ];
 
+// --- Arena alert (кольцо тревоги) ---
+const ARENA_COLOR_NORMAL = 0x66D966;  // зелёный
+const ARENA_COLOR_ALERT  = 0xFFD200;  // жёлтый
+const ARENA_STROKE_NORMAL = 4;
+const ARENA_STROKE_PULSE_MIN = 4;
+const ARENA_STROKE_PULSE_MAX = 10;
+const ARENA_ALERT_DISTANCE = 70; // px до границы, когда включать тревогу
+
+let arenaIsAlert = false;
+let arenaPulse = 0;       // 0..1
+let arenaPulseTween = null;
+
+const DPR = Math.min(window.devicePixelRatio || 1, 2); // ограничиваем, чтобы не лагало
+
 const config = {
-  type: Phaser.AUTO,
+  type: Phaser.CANVAS,          // важнее чем AUTO для четкости
   backgroundColor: "#170F63",
+
+  render: {
+    pixelArt: false,
+    antialias: false,           // ВЫКЛ сглаживание
+    roundPixels: true,
+    transparent: false,
+    clearBeforeRender: true,
+    resolution: DPR             // ключевой параметр
+  },
+
   scale: {
-    mode: Phaser.Scale.FIT,
+    mode: Phaser.Scale.NONE,    // ❗ НИКАКОГО FIT
     autoCenter: Phaser.Scale.CENTER_BOTH,
     width: GAME_W,
     height: GAME_H,
   },
+
   scene: { create, update }
 };
+
 
 const game = new Phaser.Game(config);
 
@@ -54,7 +80,6 @@ let arenaRadius = 180;
 
 let level = 1;
 let timeLeft = LEVEL_TIME_SEC;
-
 let livesLeft = LIVES_TOTAL;
 
 let arenaGfx;
@@ -96,7 +121,7 @@ function create() {
   this.input.on("dragstart", (pointer, obj) => {
     if (gameEnded || !gameStarted) return;
     dragged = obj;
-    obj.setScale(1.08); // небольшой визуальный фидбек
+    obj.setScale(1.08);
   });
 
   this.input.on("drag", (pointer, obj, dragX, dragY) => {
@@ -110,7 +135,6 @@ function create() {
     dragged = null;
     obj.setScale(1.0);
 
-    // Мягко “впихиваем” к центру
     this.tweens.add({
       targets: obj,
       x: Phaser.Math.Linear(obj.x, centerX, 0.35),
@@ -175,6 +199,18 @@ function update(time, delta) {
       return;
     }
   }
+
+  // --- проверка тревоги: кто-то близко к границе? ---
+  let danger = false;
+  for (const d of demons) {
+    const dist = Math.hypot(d.x - centerX, d.y - centerY);
+    const toEdge = arenaRadius - dist;
+    if (toEdge <= ARENA_ALERT_DISTANCE) {
+      danger = true;
+      break;
+    }
+  }
+  setArenaAlert(this, danger);
 }
 
 // --------------------
@@ -255,6 +291,8 @@ function startLevel(scene, options = {}) {
     d.setInteractive({ useHandCursor: true });
     scene.input.setDraggable(d);
   }
+
+  setArenaAlert(scene, false);
 }
 
 function resetGameToStart(scene) {
@@ -279,6 +317,8 @@ function winGame(scene) {
   gameEnded = true;
   if (tickEvent) tickEvent.remove(false);
 
+  setArenaAlert(scene, false);
+
   dragged = null;
   for (const d of demons) d.disableInteractive();
 
@@ -289,10 +329,47 @@ function loseGame(scene) {
   gameEnded = true;
   if (tickEvent) tickEvent.remove(false);
 
+  setArenaAlert(scene, false);
+
   dragged = null;
   for (const d of demons) d.disableInteractive();
 
   showLoseUI(scene);
+}
+
+// --------------------
+// Arena alert helpers
+// --------------------
+function setArenaAlert(scene, on) {
+  if (arenaIsAlert === on) return;
+
+  arenaIsAlert = on;
+
+  if (arenaIsAlert) {
+    arenaPulse = 0;
+
+    if (arenaPulseTween) arenaPulseTween.stop();
+
+    arenaPulseTween = scene.tweens.add({
+      targets: { v: 0 },
+      v: 1,
+      duration: 450,
+      yoyo: true,
+      repeat: -1,
+      ease: "Sine.easeInOut",
+      onUpdate: (tw, target) => {
+        arenaPulse = target.v;
+        drawArena();
+      },
+    });
+  } else {
+    if (arenaPulseTween) {
+      arenaPulseTween.stop();
+      arenaPulseTween = null;
+    }
+    arenaPulse = 0;
+    drawArena();
+  }
 }
 
 // --------------------
@@ -332,7 +409,7 @@ function showIntroUI(scene) {
     wordWrap: { width: GAME_W - 40 }
   }).setOrigin(0.5);
 
-  // Кнопка "Начать" (цвета по твоим требованиям)
+  // Кнопка "Начать"
   const btnW = 240;
   const btnH = 54;
   const btnY = centerY + 220;
@@ -354,7 +431,6 @@ function showIntroUI(scene) {
     gameStarted = true;
     gameEnded = false;
 
-    // сброс
     level = 1;
     livesLeft = LIVES_TOTAL;
     timeLeft = LEVEL_TIME_SEC;
@@ -439,7 +515,7 @@ function destroyWinUI() {
 }
 
 // --------------------
-// Lose UI (когда закончились жизни)
+// Lose UI
 // --------------------
 function showLoseUI(scene) {
   destroyLoseUI();
@@ -469,6 +545,7 @@ function showLoseUI(scene) {
   const btnH = 54;
   const btnY = centerY + 30;
 
+  // ВАЖНО: origin должен быть 0.5, иначе кнопку "уведёт" влево/вверх
   const btnBg = scene.add.rectangle(centerX, btnY, btnW, btnH, 0x66D966, 1).setOrigin(0.5);
   btnBg.setStrokeStyle(1, 0x000000, 1);
 
@@ -480,10 +557,7 @@ function showLoseUI(scene) {
   }).setOrigin(0.5);
 
   btnBg.setInteractive({ useHandCursor: true });
-  btnBg.on("pointerdown", () => {
-    // сброс на 1 уровень
-    resetGameToStart(scene);
-  });
+  btnBg.on("pointerdown", () => resetGameToStart(scene));
 
   loseContainer.add([overlay, title, body, btnBg, btnText]);
 }
@@ -507,14 +581,23 @@ function openCourseLink() {
 }
 
 function levelSpeedMultiplier(lvl) {
-  // плавное ускорение по уровням
   const map = [0.2, 0.3, 0.4, 0.5, 0.6];
   return map[Math.max(0, Math.min(map.length - 1, lvl - 1))];
 }
 
 function drawArena() {
   arenaGfx.clear();
-  arenaGfx.lineStyle(4, 0x66D966, 1);
+
+  const color = arenaIsAlert ? ARENA_COLOR_ALERT : ARENA_COLOR_NORMAL;
+
+  const stroke =
+    arenaIsAlert
+      ? Math.round(Phaser.Math.Linear(ARENA_STROKE_PULSE_MIN, ARENA_STROKE_PULSE_MAX, arenaPulse))
+      : ARENA_STROKE_NORMAL;
+
+  const alpha = arenaIsAlert ? Phaser.Math.Linear(0.65, 1.0, arenaPulse) : 1;
+
+  arenaGfx.lineStyle(stroke, color, alpha);
   arenaGfx.strokeCircle(centerX, centerY, arenaRadius);
 }
 
