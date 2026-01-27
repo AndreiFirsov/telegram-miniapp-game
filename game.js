@@ -20,8 +20,8 @@ const GAME_W = 360;
 const GAME_H = 640;
 
 // Промокод/скидка
-const PROMO_CODE = "ARCH20";
-const PROMO_TEXT = `Победа! Промокод -20%: ${PROMO_CODE}`;
+const PROMO_CODE = "ARCH10";
+const PROMO_TEXT = `Победа! Промокод -10%: ${PROMO_CODE}`;
 
 // Ссылка на курс
 const COURSE_URL = "https://slurm.io/architect";
