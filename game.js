@@ -24,7 +24,7 @@ const PROMO_CODE = "ARCH10";
 const PROMO_TEXT = `Победа! Промокод -10%: ${PROMO_CODE}`;
 
 // Ссылка на курс
-const COURSE_URL = "https://slurm.io/architect";
+const COURSE_URL = "https://slurm.io/architect?&utm_source=app&utm_medium=posev&utm_campaign=architect&utm_term=28_01_26";
 
 // Типы проблем (эмодзи + диапазоны скорости)
 const PROBLEM_TYPES = [
